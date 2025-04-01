@@ -21,8 +21,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,7 +36,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.android.volley.Request
-import com.android.volley.Response
 import com.android.volley.VolleyError
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
@@ -45,26 +46,28 @@ import kotlinx.serialization.json.jsonPrimitive
 
 class MainActivity : ComponentActivity() {
 
-    val exchangeRate = mutableStateOf( 171 )
+    companion object {
+        private const val DEFAULT_RATE = 167
+    }
 
-    val showDialog = mutableStateOf(false)
+    private var exchangeRate by mutableIntStateOf(DEFAULT_RATE)
+    private var showDialog by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val inputText = mutableStateOf("")
+        var inputText by mutableStateOf("")
+
         setContent {
-            if (showDialog.value){
+            if (showDialog) {
                 AlertDialog(
                     title = {
                         Text(text = "Network error")
                     },
                     text = {
-                        Text("Exchange rate is set to default value")
+                        Text("Exchange rate is set to the default value")
                     },
                     confirmButton = {
-                        TextButton(
-                            onClick = { showDialog.value = false }
-                        ) {
+                        TextButton(onClick = { showDialog = false }) {
                             Text("OK")
                         }
                     },
@@ -72,109 +75,101 @@ class MainActivity : ComponentActivity() {
                     dismissButton = null
                 )
             }
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxSize().padding(32.dp)
-            ) {
-                Text(
-                    "Convert JPY to VND",
-                    fontSize = 24.sp,
+                modifier = Modifier.fillMaxSize().padding(32.dp)) {
+
+                Text("Convert JPY to VND", fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                CurrencyCard(
-                    drawableId = R.drawable.vietnam,
-                    contentDescription = "Vietnam Flag",
-                    inputText = inputText,
-                    exchangeRate = exchangeRate,
+                    modifier = Modifier.padding(bottom = 8.dp))
+
+                CurrencyCard(drawableId = R.drawable.vietnam,
+                    contentDescription = "The Vietnam flag",
                     unitString = "VND",
-                    unitColor = Color.Red
-                )
+                    unitColor = Color.Red) {
+
+                    Text(
+                        convertJpyToVnd(inputText, exchangeRate),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 CurrencyCard(
                     drawableId = R.drawable.japan,
-                    contentDescription = "Japan Flag",
-                    inputText = inputText,
-                    exchangeRate = exchangeRate,
+                    contentDescription = "The Japan flag",
                     unitString = "JPY",
-                    unitColor = Color.Blue
-                )
+                    unitColor = Color.Blue,
+                ) {
+                    TextField(
+                        inputText,
+                        onValueChange = { inputText = it },
+                        textStyle = TextStyle(
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                        ),
+                        modifier = Modifier.weight(1f).padding(8.dp),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Decimal
+                        )
+                    )
+                }
             }
         }
     }
 
     override fun onStart() {
         super.onStart()
+
         val url = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/vnd.json"
-        val onSuccess = { jsonString: String ->
-            val data = Json.parseToJsonElement(jsonString)
-            val vndData = data.jsonObject["vnd"]
-            if (vndData != null) {
-                val jpyData = vndData.jsonObject["jpy"]
-                if (jpyData != null) {
-                    val rate = jpyData.jsonPrimitive.floatOrNull
-                    if (rate != null) {
-                        exchangeRate.value = (1f / rate).toInt()
-                    }
+        val onSuccess: (String) -> Unit = {
+            Json.parseToJsonElement(it)
+                .jsonObject["vnd"]!!
+                .jsonObject["jpy"]!!
+                .jsonPrimitive.floatOrNull?.apply {
+                    exchangeRate = (1f / this).toInt()
                 }
-            }
         }
+
+        val onError = { _: VolleyError ->
+            showDialog = true
+            exchangeRate = DEFAULT_RATE
+        }
+        val req = StringRequest(Request.Method.GET, url, onSuccess, onError)
+        val queue = Volley.newRequestQueue(this)
+        req.setShouldCache(false)
+        queue.add(req)
     }
-    val onError = { error: VolleyError ->
-        showDialog.value = true
-        exchangeRate.value = 167
-    }
-    val req = StringRequest(Request.Method.GET, url, onSuccess, onError)
-    val queue = Volley.newRequestQueue(this)
-    req.setShouldCache(false)
-    queue.add(req)
 }
 
+fun convertJpyToVnd(text: String, exchangeRate: Int) =
+    text.toIntOrNull()?.let { it * exchangeRate }?.toString() ?: ""
+
 @Composable
-fun CurrencyCard(
-    @DrawableRes drawableId: Int,
-    contentDescription: String,
-    inputText: MutableState<String>,
-    exchangeRate: MutableState<Int>,
-    unitString: String,
-    unitColor: Color
-) {
-    Card(
-        shape = RoundedCornerShape(8.dp),
+fun CurrencyCard(@DrawableRes drawableId: Int,
+                 contentDescription: String,
+                 unitString: String,
+                 unitColor: Color,
+                 composable: @Composable () -> Unit) {
+
+    Card(shape = RoundedCornerShape(8.dp),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
-        modifier = Modifier.fillMaxWidth().padding(8.dp)
-    ) {
-        Row(
-            horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+
+        Row(horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(12.dp)
-        ) {
+            modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+
             Image(
-                painter = painterResource(drawableId),
+                painterResource(drawableId),
                 contentDescription = contentDescription,
                 modifier = Modifier.requiredSize(40.dp)
             )
-            if (unitString == "VND") {
-                Text(
-                    text = convertJpyToVnd(inputText.value, exchangeRate.value),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            } else {
-                TextField(
-                    value = inputText.value,
-                    onValueChange = { inputText.value = it },
-                    textStyle = TextStyle(
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    ),
-                    modifier = Modifier.weight(1f).padding(8.dp),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal
-                    )
-                )
-            }
+
+            composable()
+
             Text(
                 text = unitString,
                 color = unitColor,
@@ -182,14 +177,5 @@ fun CurrencyCard(
                 fontWeight = FontWeight.Bold
             )
         }
-    }
-}
-
-fun convertJpyToVnd(text: String, exchangeRate: Int): String {
-    val i = text.toIntOrNull()
-    return if (i == null) {
-        ""
-    } else {
-        (i * 171).toString()
     }
 }
